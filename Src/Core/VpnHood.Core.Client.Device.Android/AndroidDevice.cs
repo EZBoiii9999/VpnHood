@@ -1,7 +1,9 @@
 ﻿using Android.Content;
+using Android.Content.Res;
 using Android.Net;
 using Android.OS;
 using Microsoft.Extensions.Logging;
+using VpnHood.Core.Client.Abstractions.Exceptions;
 using VpnHood.Core.Client.Device.Droid.ActivityEvents;
 using VpnHood.Core.Client.Device.Droid.Utils;
 using VpnHood.Core.Client.Device.UiContexts;
@@ -18,9 +20,12 @@ public class AndroidDevice : Singleton<AndroidDevice>, IDevice
     public bool IsBindProcessToVpnSupported => true;
     public bool IsExcludeAppsSupported => true;
     public bool IsIncludeAppsSupported => true;
-    public bool IsAlwaysOnSupported => OperatingSystem.IsAndroidVersionAtLeast(24);
-    public string OsInfo => $"{Build.Manufacturer}: {Build.Model}, Android: {Build.VERSION.Release}";
+    public bool IsAlwaysOnSupported { get; } = OperatingSystem.IsAndroidVersionAtLeast(24);
+    public string OsInfo { get; } = $"{Build.Manufacturer}: {Build.Model}, Android: {Build.VERSION.Release}";
     public string VpnServiceConfigFolder => AndroidVpnService.VpnServiceConfigFolder;
+    public bool IsTv { get; } = 
+        ((UiModeManager?)Application.Context.GetSystemService(Context.UiModeService))?
+        .CurrentModeType == UiMode.TypeTelevision;
 
     public static AndroidDevice Create()
     {
@@ -79,10 +84,10 @@ public class AndroidDevice : Singleton<AndroidDevice>, IDevice
                 .VhConfigureAwait();
 
             if (!_grantPermissionTaskSource.Task.IsCompletedSuccessfully)
-                throw new Exception("Could not grant VPN permission in the given time.");
+                throw new TimeoutException("Could not grant VPN permission in the given time.");
 
             if (!await _grantPermissionTaskSource.Task)
-                throw new Exception("VPN permission has been rejected.");
+                throw new UserCanceledException("VPN permission has been rejected.");
         }
         finally {
             activityEvent.ActivityResultEvent -= Activity_OnActivityResult;

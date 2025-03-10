@@ -1,8 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<Description>Shared library for VpnHood Windows WPF Clients using SPA</Description>
-		<TargetFramework>netstandard2.1</TargetFramework>
-		<RootNamespace>VpnHood.AppLib.Win.Common.WpfSpa</RootNamespace>
+		<Description>VpnHood client device provider for Windows using WinDivert</Description>
+		<TargetFramework>net9.0</TargetFramework>
 	</PropertyGroup>
 
 	<PropertyGroup>
@@ -26,28 +25,17 @@
 
 	<ItemGroup>
 		<None Include="..\..\..\VpnHood.png" Link="Resources\VpnHood.png">
-			<PackagePath></PackagePath>
 			<Pack>True</Pack>
+			<PackagePath></PackagePath>
 		</None>
 	</ItemGroup>
 
-	<PropertyGroup>
-		<TargetFramework>net9.0-windows</TargetFramework>
-		<Nullable>enable</Nullable>
-		<UseWPF>true</UseWPF>
-		<ImplicitUsings>enable</ImplicitUsings>
-	</PropertyGroup>
-
 	<ItemGroup>
-		<ProjectReference Include="..\VpnHood.AppLib.WebServer\VpnHood.AppLib.WebServer.csproj" />
-		<ProjectReference Include="..\VpnHood.AppLib.Win.Common\VpnHood.AppLib.Win.Common.csproj" />
-		<ProjectReference Include="..\..\Core\VpnHood.Core.Client.Device.Win\VpnHood.Core.Client.Device.Win.csproj" />
+		<ProjectReference Include="..\VpnHood.Core.Client.Device\VpnHood.Core.Client.Device.csproj" />
+		<ProjectReference Include="..\VpnHood.Core.Client.VpnServices.Host\VpnHood.Core.Client.VpnServices.Host.csproj" />
+		<ProjectReference Include="..\VpnHood.Core.VpnAdapters.WinDivert\VpnHood.Core.VpnAdapters.WinDivert.csproj" />
+		<ProjectReference Include="..\VpnHood.Core.VpnAdapters.WinTun\VpnHood.Core.VpnAdapters.WinTun.csproj" />
 	</ItemGroup>
-
-	<ItemGroup>
-		<PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3065.39" />
-	</ItemGroup>
-
 
 
 </Project>

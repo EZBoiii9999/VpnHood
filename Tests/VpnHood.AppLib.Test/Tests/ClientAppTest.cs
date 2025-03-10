@@ -16,7 +16,6 @@ using VpnHood.Core.Toolkit.Net;
 using VpnHood.Core.Toolkit.Utils;
 using VpnHood.Core.Tunneling;
 using VpnHood.Test;
-using VpnHood.Test.Device;
 
 // ReSharper disable DisposeOnUsingVariable
 
@@ -172,19 +171,10 @@ public class ClientAppTest : TestAppBase
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task IpFilters(bool isDnsServerSupported)
+    public async Task IpFilters()
     {
-        var testDns = !isDnsServerSupported; //dns will work as normal UDP when DnsServerSupported, otherwise it should be redirected
         var testPing = false; //todo (not supported yet)
-
-        // create device
-        var deviceOptions = new TestVpnAdapterOptions {
-            IsDnsServerSupported = isDnsServerSupported,
-            CaptureDnsAddresses = TestHelper.TestIpAddresses.ToArray()
-        };
-        var device = TestHelper.CreateDevice(deviceOptions);
+        var device = TestHelper.CreateDevice();
 
         // Create Server
         await using var server = await TestHelper.CreateServer(socketFactory: device.SocketFactory);
@@ -212,7 +202,7 @@ public class ClientAppTest : TestAppBase
         await TestHelper.Test_Ping(ipAddress: TestConstants.PingV4Address1);
 
         VhLogger.Instance.LogDebug(GeneralEventId.Test, "Starting IpFilters_TestInclude...");
-        await IpFilters_TestInclude(app, testPing: testPing, testUdp: true, testDns: testDns);
+        await IpFilters_TestInclude(app, testPing: testPing, testUdp: true, testDns: true);
         await app.Disconnect();
 
         // ************
@@ -223,7 +213,7 @@ public class ClientAppTest : TestAppBase
         await app.WaitForState(AppConnectionState.Connected);
 
         VhLogger.Instance.LogDebug(GeneralEventId.Test, "Starting IpFilters_TestExclude...");
-        await IpFilters_TestExclude(app, testPing: testPing, testUdp: true, testDns: testDns);
+        await IpFilters_TestExclude(app, testPing: testPing, testUdp: true, testDns: true);
         await app.Disconnect();
     }
 

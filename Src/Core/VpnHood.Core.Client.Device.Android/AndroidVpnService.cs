@@ -45,9 +45,8 @@ public class AndroidVpnService : VpnService, IVpnServiceHandler
         switch (action) {
             // signal start command
             case null or "android.net.VpnService" or "connect":
-                return _vpnServiceHost.Connect(forceReconnect: action == "connect")
-                    ? StartCommandResult.Sticky
-                    : StartCommandResult.NotSticky;
+                _vpnServiceHost.Connect(forceReconnect: action == "connect");
+                return StartCommandResult.Sticky;
 
             case "disconnect":
                 _vpnServiceHost.Disconnect();
@@ -58,10 +57,14 @@ public class AndroidVpnService : VpnService, IVpnServiceHandler
         }
     }
 
-    public IVpnAdapter CreateAdapter()
+    public IVpnAdapter CreateAdapter(VpnAdapterSettings adapterSettings)
     {
         return new AndroidVpnAdapter(this, new AndroidVpnAdapterSettings {
-            AdapterName = "VpnHood", 
+            AdapterName = adapterSettings.AdapterName, 
+            MaxPacketCount = adapterSettings.MaxPacketCount,
+            Logger = adapterSettings.Logger,
+            MaxAutoRestartCount = adapterSettings.MaxAutoRestartCount,
+            MaxPacketSendDelay = adapterSettings.MaxPacketSendDelay
         });
     }
 

@@ -34,6 +34,7 @@ using VpnHood.Core.Toolkit.Jobs;
 using VpnHood.Core.Toolkit.Logging;
 using VpnHood.Core.Toolkit.Net;
 using VpnHood.Core.Toolkit.Utils;
+using VpnHood.Core.Client.Abstractions.Exceptions;
 
 namespace VpnHood.AppLib;
 
@@ -45,6 +46,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
     private const string FolderNameProfiles = "profiles";
     private readonly bool _useInternalLocationService;
     private readonly bool _useExternalLocationService;
+    private readonly TimeSpan _locationServiceTimeout;
     private readonly bool _disconnectOnDispose;
     private readonly bool _autoDiagnose;
     private readonly bool _allowEndPointTracker;
@@ -65,7 +67,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
     private bool _isDisconnecting;
     private bool _isLoadingCountryIpRange;
     private bool _isFindingCountryCode;
-    private AppConnectionState _lastConnectionState;
+    private AppConnectionState? _lastConnectionState;
     private CancellationTokenSource _connectCts = new();
     private CancellationTokenSource _connectTimeoutCts = new();
     private VersionCheckResult? _versionCheckResult;
@@ -106,6 +108,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
         _appPersistState = AppPersistState.Load(Path.Combine(StorageFolderPath, FileNamePersistState));
         _useInternalLocationService = options.UseInternalLocationService;
         _useExternalLocationService = options.UseExternalLocationService;
+        _locationServiceTimeout = options.LocationServiceTimeout;
         _ga4MeasurementId = options.Ga4MeasurementId;
         _versionCheckInterval = options.VersionCheckInterval;
         _reconnectTimeout = options.ReconnectTimeout;
@@ -164,6 +167,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             IsAddAccessKeySupported = options.IsAddAccessKeySupported,
             IsPremiumFlagSupported = !options.IsAddAccessKeySupported,
             IsPremiumFeaturesForced = options.IsAddAccessKeySupported,
+            IsTv = device.IsTv,
             AdjustForSystemBars = options.AdjustForSystemBars,
             UpdateInfoUrl = options.UpdateInfoUrl != null ? new Uri(options.UpdateInfoUrl) : null,
             UiName = options.UiName,
@@ -414,7 +418,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
     private LogServiceOptions GetLogOptions()
     {
         var logLevel = _logServiceOptions.LogLevel;
-        if (HasDebugCommand(DebugCommands.LogDebug)) logLevel = LogLevel.Debug;
+        if (HasDebugCommand(DebugCommands.LogDebug) || Features.IsDebugMode) logLevel = LogLevel.Debug;
         if (HasDebugCommand(DebugCommands.LogTrace)) logLevel = LogLevel.Trace;
         var logOptions = new LogServiceOptions {
             LogLevel = logLevel,
@@ -424,7 +428,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             LogToConsole = _logServiceOptions.LogToConsole,
             LogToFile = _logServiceOptions.LogToFile,
             AutoFlush = _logServiceOptions.AutoFlush,
-            GlobalScope = _logServiceOptions.GlobalScope
+            CategoryName = _logServiceOptions.CategoryName
         };
         return logOptions;
     }
@@ -514,12 +518,13 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
                 VhLogger.Instance.LogInformation("CountryCode: {CountryCode}",
                     VhUtils.TryGetCountryName(await GetCurrentCountryAsync(cancellationToken).VhConfigureAwait()));
 
-            VhLogger.Instance.LogInformation("Client is Connecting ...");
 
             // request features for the first time
+            VhLogger.Instance.LogDebug("Requesting Features ...");
             await RequestFeatures(cancellationToken).VhConfigureAwait();
 
             // connect
+            VhLogger.Instance.LogInformation("Client is Connecting ...");
             await ConnectInternal(clientProfile.Token,
                     serverLocation: serverLocation,
                     userAgent: connectOptions.UserAgent,
@@ -556,7 +561,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
 
             // throw OperationCanceledException if user has canceled the connection
             if (_appPersistState.HasDisconnectedByUser) {
-                throw new OperationCanceledException("Connection has been canceled by the user.", ex);
+                throw new UserCanceledException("Connection has been canceled by the user.");
             }
 
             // check no internet connection, use original cancellation token to avoid timeout exception
@@ -610,6 +615,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
 
         // create clientOptions
         var clientOptions = new ClientOptions {
+            AppName = Resources.Strings.AppName,
             ClientId = Features.ClientId,
             AccessKey = token.ToAccessKey(),
             SessionTimeout = _sessionTimeout,
@@ -643,6 +649,8 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             Version = Features.Version,
             TrackerFactoryAssemblyQualifiedName = _trackerFactory.GetType().AssemblyQualifiedName,
             UserAgent = userAgent ?? ClientOptions.Default.UserAgent,
+            DebugData1 = UserSettings.DebugData1,
+            DebugData2 = UserSettings.DebugData2,
         };
 
         try {
@@ -680,6 +688,10 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             _ = VersionCheck(delay: Services.AdService.ShowAdPostDelay.Add(TimeSpan.FromSeconds(1)));
         }
         catch (Exception ex) {
+            // update last error if user has exclusively cancelled the operation
+            if (ex is UserCanceledException)
+                _appPersistState.HasDisconnectedByUser = true;
+
             if (ex is SessionException sessionException) {
                 // update access token if AccessKey is set
                 if (!string.IsNullOrWhiteSpace(sessionException.SessionResponse.AccessKey)) {
@@ -721,6 +733,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             Services.UiProvider.IsQuickLaunchSupported &&
             Settings.IsQuickLaunchEnabled is null) {
             try {
+                VhLogger.Instance.LogInformation("Prompting for Quick Launch...");
                 Settings.IsQuickLaunchEnabled =
                     await Services.UiProvider.RequestQuickLaunch(AppUiContext.RequiredContext, cancellationToken)
                         .VhConfigureAwait();
@@ -737,6 +750,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
             Services.UiProvider.IsNotificationSupported &&
             Settings.IsNotificationEnabled is null) {
             try {
+                VhLogger.Instance.LogInformation("Prompting for notifications...");
                 Settings.IsNotificationEnabled =
                     await Services.UiProvider.RequestNotification(AppUiContext.RequiredContext, cancellationToken)
                         .VhConfigureAwait();
@@ -749,9 +763,10 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
         }
     }
 
-    public CultureInfo SystemUiCulture =>
-        _systemUiCulture ?? new CultureInfo(Services.CultureProvider.SystemCultures.FirstOrDefault() ??
-                                            CultureInfo.InstalledUICulture.Name);
+    public CultureInfo SystemUiCulture => 
+        _systemUiCulture ?? 
+        new CultureInfo(Services.CultureProvider.SystemCultures.FirstOrDefault() ??
+                        CultureInfo.InstalledUICulture.Name);
 
     private void InitCulture()
     {
@@ -799,7 +814,7 @@ public class VpnHoodApp : Singleton<VpnHoodApp>,
                 if (_useInternalLocationService)
                     providers.Add(IpRangeLocationProvider);
 
-                var compositeProvider = new CompositeIpLocationProvider(VhLogger.Instance, providers);
+                var compositeProvider = new CompositeIpLocationProvider(VhLogger.Instance, providers, providerTimeout: _locationServiceTimeout);
                 var ipLocation = await compositeProvider.GetCurrentLocation(cancellationToken).VhConfigureAwait();
                 UpdateCurrentCountry(ipLocation.CountryCode);
             }

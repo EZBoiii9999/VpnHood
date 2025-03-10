@@ -13,6 +13,7 @@ namespace VpnHood.Core.Client.VpnServices.Host;
 
 public class VpnServiceHost : IAsyncDisposable
 {
+    private readonly object _connectLock = new();
     private readonly ApiController _apiController;
     private readonly IVpnServiceHandler _vpnServiceHandler;
     private readonly ISocketFactory _socketFactory;
@@ -22,6 +23,7 @@ public class VpnServiceHost : IAsyncDisposable
     internal VpnHoodClient? Client { get; private set; }
     internal VpnHoodClient RequiredClient => Client ?? throw new InvalidOperationException("Client is not initialized.");
     internal VpnServiceContext Context { get; }
+    public ClientOptions? ClientOptions { get; private set; }
 
     public VpnServiceHost(
         string configFolder,
@@ -75,73 +77,107 @@ public class VpnServiceHost : IAsyncDisposable
         });
     }
 
-    private readonly object _connectLock = new();
-    public bool Connect(bool forceReconnect = false)
+    public void Connect(bool forceReconnect = false)
     {
         if (_isDisposed)
             throw new ObjectDisposedException(nameof(VpnServiceHost));
 
-        lock (_connectLock) {
-            VhLogger.Instance.LogDebug("VpnService is connecting... ProcessId: {ProcessId}", Process.GetCurrentProcess().Id);
+        // handle previous client
+        var client = Client;
+        if (!forceReconnect && client is { State: ClientState.Connected or ClientState.Connecting or ClientState.Waiting }) {
+            VhLogger.Instance.LogWarning("VpnService connection is already in progress.");
+            return; // user must disconnect first
+        }
 
-            // handle previous client
-            var client = Client;
-            if (client != null) {
-                if (!forceReconnect && client is { State: ClientState.Connected or ClientState.Connecting or ClientState.Waiting }) {
-                    VhLogger.Instance.LogWarning("VpnService connection is already in progress.");
-                    return true; // user must disconnect first
-                }
+        var clientOptions = Context.ReadClientOptions();
+
+        // create a connection info for notification
+        var connectInfo = client != null
+            ? client.ToConnectionInfo(_apiController)
+            : new ConnectionInfo {
+                ClientState = ClientState.Initializing,
+                ApiKey = _apiController.ApiKey,
+                ApiEndPoint = _apiController.ApiEndPoint,
+                SessionInfo = null,
+                SessionStatus = null,
+                Error = null,
+                SessionName = clientOptions.SessionName
+            };
+
+        // show notification as soon as possible
+        _vpnServiceHandler.ShowNotification(connectInfo);
+
+        // run the connection in background
+        Task.Run(() => {
+            lock (_connectLock) {
+                ConnectTask(clientOptions);
+            }
+        });
+    }
+
+    private void ConnectTask(ClientOptions clientOptions)
+    {
+        VhLogger.Instance.LogDebug("VpnService is connecting... ProcessId: {ProcessId}", Process.GetCurrentProcess().Id);
+
+        // handle previous client
+        var client = Client;
+        if (client != null) {
+            lock (client) {
 
                 // before VpnHoodClient disposed, don't let the old connection overwrite the state or stop the service
                 client.StateChanged -= VpnHoodClient_StateChanged;
                 _ = client.DisposeAsync(); //let dispose in the background
                 Client = null;
             }
+        }
 
-            // create service
-            try {
-                // read client options and start log service
-                var clientOptions = Context.ReadClientOptions();
-                _logService?.Start(clientOptions.LogServiceOptions);
-                
-                // sni is sensitive, must be explicitly enabled
-                clientOptions.ForceLogSni |=
-                    clientOptions.LogServiceOptions.LogEventNames.Contains(nameof(GeneralEventId.Sni), StringComparer.OrdinalIgnoreCase);
+        // create service
+        try {
+            // read client options and start log service
+            ClientOptions = clientOptions;
+            _logService?.Start(clientOptions.LogServiceOptions);
 
-                // create tracker
-                var trackerFactory = TryCreateTrackerFactory(clientOptions.TrackerFactoryAssemblyQualifiedName);
-                var tracker = trackerFactory?.TryCreateTracker(new TrackerCreateParams {
-                    ClientId = clientOptions.ClientId,
-                    ClientVersion = clientOptions.Version,
-                    Ga4MeasurementId = clientOptions.Ga4MeasurementId,
-                    UserAgent = clientOptions.UserAgent
-                });
+            // sni is sensitive, must be explicitly enabled
+            clientOptions.ForceLogSni |=
+                clientOptions.LogServiceOptions.LogEventNames.Contains(nameof(GeneralEventId.Sni),
+                    StringComparer.OrdinalIgnoreCase);
 
-                // create client
-                VhLogger.Instance.LogDebug("VpnService is creating a new VpnHoodClient.");
-                Client = new VpnHoodClient(
-                    vpnAdapter: clientOptions.UseNullCapture ? new NullVpnAdapter() : _vpnServiceHandler.CreateAdapter(),
-                    tracker: tracker,
-                    socketFactory: _socketFactory,
-                    options: clientOptions
-                );
-                Client.StateChanged += VpnHoodClient_StateChanged;
-                Client.StateChanged += VpnHoodClient_StateChangedForDisposal;
+            // create tracker
+            var trackerFactory = TryCreateTrackerFactory(clientOptions.TrackerFactoryAssemblyQualifiedName);
+            var tracker = trackerFactory?.TryCreateTracker(new TrackerCreateParams {
+                ClientId = clientOptions.ClientId,
+                ClientVersion = clientOptions.Version,
+                Ga4MeasurementId = clientOptions.Ga4MeasurementId,
+                UserAgent = clientOptions.UserAgent
+            });
 
-                // show notification. start foreground service
-                _vpnServiceHandler.ShowNotification(Client.ToConnectionInfo(_apiController));
+            // create client
+            VhLogger.Instance.LogDebug("VpnService is creating a new VpnHoodClient.");
+            var adapterSetting = new VpnAdapterSettings {
+                AdapterName = clientOptions.AppName
+            };
+            Client = new VpnHoodClient(
+                vpnAdapter: clientOptions.UseNullCapture
+                    ? new NullVpnAdapter()
+                    : _vpnServiceHandler.CreateAdapter(adapterSetting),
+                tracker: tracker,
+                socketFactory: _socketFactory,
+                options: clientOptions
+            );
+            Client.StateChanged += VpnHoodClient_StateChanged;
+            Client.StateChanged += VpnHoodClient_StateChangedForDisposal;
 
-                // let connect in the background
-                // ignore cancellation because it will be cancelled by disconnect or dispose
-                _ = Client.Connect(CancellationToken.None);
-                return true;
-            }
-            catch (Exception ex) {
-                _ = Context.WriteConnectionInfo(BuildConnectionInfo(ClientState.Disposed, ex));
-                _vpnServiceHandler.StopNotification();
-                _vpnServiceHandler.StopSelf();
-                return false;
-            }
+            // show notification.
+            _vpnServiceHandler.ShowNotification(Client.ToConnectionInfo(_apiController));
+
+            // let connect in the background
+            // ignore cancellation because it will be cancelled by disconnect or dispose
+            _ = Client.Connect(CancellationToken.None);
+        }
+        catch (Exception ex) {
+            _ = Context.WriteConnectionInfo(BuildConnectionInfo(ClientState.Disposed, ex));
+            _vpnServiceHandler.StopNotification();
+            _vpnServiceHandler.StopSelf();
         }
     }
 

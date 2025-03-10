@@ -8,9 +8,8 @@ public class NullVpnAdapter : IVpnAdapter
     public event EventHandler<PacketReceivedEventArgs>? PacketReceived;
     public event EventHandler? Disposed;
     public virtual bool Started { get; set; }
-    public virtual bool IsDnsServerSupported { get; set; } = true;
     public virtual bool IsNatSupported { get; set; } = true;
-    public virtual bool CanProtectClient { get; set; } = true;
+    public virtual bool CanProtectSocket { get; set; } = true;
 
     public virtual Task Start(VpnAdapterOptions options, CancellationToken cancellationToken)
     {
@@ -27,16 +26,6 @@ public class NullVpnAdapter : IVpnAdapter
     public virtual void ProtectSocket(Socket socket)
     {
         // nothing
-    }
-
-    public TcpClient CreateProtectedTcpClient(AddressFamily addressFamily)
-    {
-        return new TcpClient(addressFamily);
-    }
-
-    public UdpClient CreateProtectedUdpClient(AddressFamily addressFamily)
-    {
-        return new UdpClient(addressFamily);
     }
 
     public virtual void SendPacket(IPPacket ipPacket)

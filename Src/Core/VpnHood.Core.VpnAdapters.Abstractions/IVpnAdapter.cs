@@ -8,13 +8,11 @@ public interface IVpnAdapter : IDisposable
     event EventHandler<PacketReceivedEventArgs> PacketReceived;
     event EventHandler? Disposed;
     bool Started { get; }
-    bool IsDnsServerSupported { get; }
     bool IsNatSupported { get; }
-    bool CanProtectClient { get; }
+    bool CanProtectSocket { get; }
+    void ProtectSocket(Socket socket);
     Task Start(VpnAdapterOptions options, CancellationToken cancellationToken);
     void Stop();
-    TcpClient CreateProtectedTcpClient(AddressFamily addressFamily);
-    UdpClient CreateProtectedUdpClient(AddressFamily addressFamily);
     void SendPacket(IPPacket ipPacket);
     void SendPackets(IList<IPPacket> ipPackets);
 }

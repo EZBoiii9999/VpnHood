@@ -8,7 +8,7 @@ using VpnHood.Core.Toolkit.Utils;
 
 namespace VpnHood.Core.VpnAdapters.Abstractions;
 
-public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVpnAdapter
+public abstract class TunVpnAdapter(VpnAdapterSettings adapterSettings) : IVpnAdapter
 {
     private readonly int _maxPacketSendDelayMs = (int)adapterSettings.MaxPacketSendDelay.TotalMilliseconds;
     private int _mtu = 0xFFFF;
@@ -20,9 +20,8 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
     protected ILogger Logger { get; } = adapterSettings.Logger;
     protected bool UseNat { get; private set; }
     public abstract bool IsAppFilterSupported { get; }
-    public abstract bool IsDnsServerSupported { get; }
     public abstract bool IsNatSupported { get; }
-    protected abstract bool CanProtectSocket { get; }
+    public virtual bool CanProtectSocket => true;
     protected abstract string? AppPackageId { get; }
     protected abstract Task SetMtu(int mtu, bool ipV4, bool ipV6, CancellationToken cancellationToken);
     protected abstract Task SetMetric(int metric, bool ipV4, bool ipV6, CancellationToken cancellationToken);
@@ -41,11 +40,9 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
     protected abstract void WaitForTunRead();
     protected abstract IPPacket? ReadPacket(int mtu);
     protected abstract bool WritePacket(IPPacket ipPacket);
-    protected abstract void ProtectSocket(Socket socket);
 
     public event EventHandler<PacketReceivedEventArgs>? PacketReceived;
     public event EventHandler? Disposed;
-    public virtual bool CanProtectClient => true;
     public string AdapterName { get; } = adapterSettings.AdapterName;
     public IPAddress? PrimaryAdapterIpV4 { get; private set; }
     public IPAddress? PrimaryAdapterIpV6 { get; private set; }
@@ -136,7 +133,7 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
             Logger.LogDebug("Adding routes...");
             foreach (var network in options.IncludeNetworks) {
                 var gateway = network.IsV4 ? GatewayIpV4 : GatewayIpV6;
-                if (gateway != null)
+                if (gateway != null) 
                     await AddRoute(network, gateway, cancellationToken).VhConfigureAwait();
             }
 
@@ -219,54 +216,21 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
         }
     }
 
-    public virtual UdpClient CreateProtectedUdpClient(AddressFamily addressFamily)
+    public virtual void ProtectSocket(Socket socket)
     {
-        if (CanProtectSocket) {
-            var udpClient = new UdpClient(addressFamily);
-            ProtectSocket(udpClient.Client);
-            return udpClient;
+        if (socket.LocalEndPoint != null)
+            throw new InvalidOperationException("Could not protect an already bound socket.");
+
+        //todo: check for network change
+        switch (socket.AddressFamily) {
+            case AddressFamily.InterNetwork when PrimaryAdapterIpV4 != null:
+                socket.Bind(new IPEndPoint(PrimaryAdapterIpV4, 0));
+                break;
+
+            case AddressFamily.InterNetworkV6 when PrimaryAdapterIpV6 != null:
+                socket.Bind(new IPEndPoint(PrimaryAdapterIpV6, 0));
+                break;
         }
-
-        return addressFamily switch {
-            AddressFamily.InterNetwork when PrimaryAdapterIpV4 != null =>
-                new UdpClient(new IPEndPoint(PrimaryAdapterIpV4, 0)),
-
-            AddressFamily.InterNetwork when PrimaryAdapterIpV4 == null =>
-                new UdpClient(addressFamily),
-
-            AddressFamily.InterNetworkV6 when PrimaryAdapterIpV6 != null =>
-                new UdpClient(new IPEndPoint(PrimaryAdapterIpV6, 0)),
-
-            AddressFamily.InterNetworkV6 when PrimaryAdapterIpV6 == null =>
-                new UdpClient(addressFamily),
-
-            _ => throw new NotSupportedException("The address family is not supported.")
-        };
-    }
-
-    public virtual TcpClient CreateProtectedTcpClient(AddressFamily addressFamily)
-    {
-        if (CanProtectSocket) {
-            var tcpClient = new TcpClient(addressFamily);
-            ProtectSocket(tcpClient.Client);
-            return tcpClient;
-        }
-
-        return addressFamily switch {
-            AddressFamily.InterNetwork when PrimaryAdapterIpV4 != null =>
-                new TcpClient(new IPEndPoint(PrimaryAdapterIpV4, 0)),
-
-            AddressFamily.InterNetwork when PrimaryAdapterIpV4 == null =>
-                new TcpClient(addressFamily),
-
-            AddressFamily.InterNetworkV6 when PrimaryAdapterIpV6 != null =>
-                new TcpClient(new IPEndPoint(PrimaryAdapterIpV6, 0)),
-
-            AddressFamily.InterNetworkV6 when PrimaryAdapterIpV6 == null =>
-                new TcpClient(addressFamily),
-
-            _ => throw new NotSupportedException("The address family is not supported.")
-        };
     }
 
     private IPAddress? GetPrimaryAdapterIp(IPEndPoint remoteEndPoint)
@@ -355,11 +319,16 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
         });
     }
 
-    public async Task SendPacketAsync(IList<IPPacket> ipPackets)
+    public Task SendPacketsAsync(IList<IPPacket> ipPackets)
     {
-        foreach (var ipPacket in ipPackets)
-            await SendPacketAsync(ipPacket).VhConfigureAwait();
-
+        return _sendPacketSemaphore.WaitAsync().ContinueWith(_ => {
+            try {
+                SendPackets(ipPackets);
+            }
+            finally {
+                _sendPacketSemaphore.Release();
+            }
+        });
     }
 
     protected virtual void StartReadingPackets()
@@ -417,7 +386,7 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
         AdapterOpen(CancellationToken.None);
     }
 
-    private void InvokeReadPackets(List<IPPacket> packetList)
+    protected void InvokeReadPackets(IList<IPPacket> packetList)
     {
         try {
             if (packetList.Count > 0)
@@ -427,7 +396,8 @@ public abstract class TunVpnAdapter(TunVpnAdapterSettings adapterSettings) : IVp
             Logger.LogError(ex, "Error in invoking packet received event.");
         }
         finally {
-            packetList.Clear();
+            if (!packetList.IsReadOnly)
+                packetList.Clear();
         }
     }
 

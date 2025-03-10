@@ -1,6 +1,5 @@
 ﻿using System.Net;
 using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using PacketDotNet;
@@ -11,25 +10,20 @@ using VpnHood.Core.VpnAdapters.Abstractions;
 using VpnHood.Core.VpnAdapters.LinuxTun.LinuxNative;
 
 namespace VpnHood.Core.VpnAdapters.LinuxTun;
-public class LinuxTunVpnAdapter(LinuxTunVpnAdapterSettings adapterSettings)
+public class LinuxTunVpnAdapter(LinuxVpnAdapterSettings adapterSettings)
     : TunVpnAdapter(adapterSettings)
 {
     private int _tunAdapterFd;
     private int? _metric;
     private string? _primaryAdapterName;
     public override bool IsNatSupported => true;
-    public override bool IsDnsServerSupported => true;
     public override bool IsAppFilterSupported => false;
-    protected override bool CanProtectSocket => false;
     protected override string? AppPackageId => null;
     protected override Task SetAllowedApps(string[] packageIds, CancellationToken cancellationToken) =>
         throw new NotSupportedException("App filtering is not supported on LinuxTun.");
 
     protected override Task SetDisallowedApps(string[] packageIds, CancellationToken cancellationToken) =>
         throw new NotSupportedException("App filtering is not supported on LinuxTun.");
-
-    protected override void ProtectSocket(Socket socket)
-        =>  throw new NotSupportedException("Socket protection is not supported on LinuxTun.");
 
     private static async Task<string> GetPrimaryAdapterName(CancellationToken cancellationToken)
     {
