@@ -12,6 +12,7 @@ using VpnHood.Core.Common.Exceptions;
 using VpnHood.Core.Common.Messaging;
 using VpnHood.Core.Common.Tokens;
 using VpnHood.Core.Common.Trackers;
+using VpnHood.Core.Packets;
 using VpnHood.Core.Toolkit.Jobs;
 using VpnHood.Core.Toolkit.Logging;
 using VpnHood.Core.Toolkit.Net;
@@ -30,7 +31,7 @@ namespace VpnHood.Core.Client;
 
 public class VpnHoodClient : IJob, IAsyncDisposable
 {
-    private const int MaxProtocolVersion = 6;
+    private const int MaxProtocolVersion = 7;
     private const int MinProtocolVersion = 4;
     private bool _disposed;
     private readonly bool _autoDisposeVpnAdapter;
@@ -179,7 +180,6 @@ public class VpnHoodClient : IJob, IAsyncDisposable
         _cancellationTokenSource = new CancellationTokenSource();
         JobRunner.Default.Add(this);
     }
-
 
     public ClientState State {
         get => _state;
@@ -351,8 +351,12 @@ public class VpnHoodClient : IJob, IAsyncDisposable
                     var isIpV6 = ipPacket.Version == IPVersion.IPv6;
                     var udpPacket = ipPacket.Protocol == ProtocolType.Udp ? ipPacket.Extract<UdpPacket>() : null;
 
+                    if (ipPacket.IsMulticast()) {
+                        droppedPackets.Add(ipPacket);
+                    }
+
                     // tcp already check for InInRange and IpV6 and Proxy
-                    if (ipPacket.Protocol == ProtocolType.Tcp) {
+                    else if (ipPacket.Protocol == ProtocolType.Tcp) {
                         if (_isTunProviderSupported && UseTcpOverTun && IsInIpRange(ipPacket.DestinationAddress))
                             tunnelPackets.Add(ipPacket);
                         else
@@ -568,6 +572,8 @@ public class VpnHoodClient : IJob, IAsyncDisposable
                 ClientId = ClientId,
                 ClientVersion = Version.ToString(3),
                 ProtocolVersion = _connectorService.ProtocolVersion,
+                MinProtocolVersion = MinProtocolVersion,
+                MaxProtocolVersion = MaxProtocolVersion,
                 UserAgent = UserAgent
             };
 

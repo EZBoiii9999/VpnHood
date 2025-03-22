@@ -7,14 +7,12 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using VpnHood.Core.Client;
 using VpnHood.Core.Client.Abstractions;
 using VpnHood.Core.Client.Device.UiContexts;
-using VpnHood.Core.Common.Messaging;
 using VpnHood.Core.Common.Tokens;
 using VpnHood.Core.Server;
 using VpnHood.Core.Server.Abstractions;
 using VpnHood.Core.Server.Access.Configurations;
 using VpnHood.Core.Server.Access.Managers;
 using VpnHood.Core.Server.Access.Managers.FileAccessManagement;
-using VpnHood.Core.Server.Access.Messaging;
 using VpnHood.Core.Toolkit.Jobs;
 using VpnHood.Core.Toolkit.Logging;
 using VpnHood.Core.Toolkit.Net;
@@ -81,7 +79,7 @@ public class TestHelper : IDisposable
         return _isIpV6Supported.Value;
     }
 
-    private Task<PingReply> SendPing(Ping? ping = null, IPAddress? ipAddress = null,
+    private static Task<PingReply> SendPing(Ping? ping = null, IPAddress? ipAddress = null,
         int? timeout = null)
     {
         timeout ??= TestConstants.DefaultTimeout;
@@ -308,7 +306,7 @@ public class TestHelper : IDisposable
         bool autoStart = true,
         TimeSpan? configureInterval = null,
         bool useHttpAccessManager = true,
-        ITunProvider? tunProvider = null,
+        IVpnAdapter? vpnAdapter = null,
         ISocketFactory? socketFactory = null)
     {
         return CreateServer(
@@ -317,7 +315,7 @@ public class TestHelper : IDisposable
             autoStart: autoStart,
             configureInterval: configureInterval,
             useHttpAccessManager: useHttpAccessManager,
-            tunProvider: tunProvider,
+            vpnAdapter: vpnAdapter,
             socketFactory: socketFactory);
     }
 
@@ -326,7 +324,7 @@ public class TestHelper : IDisposable
         bool autoStart, TimeSpan? configureInterval = null, bool useHttpAccessManager = true,
         INetConfigurationProvider? netConfigurationProvider = null,
         ISwapMemoryProvider? swapMemoryProvider = null,
-        ITunProvider? tunProvider = null,
+        IVpnAdapter? vpnAdapter = null,
         ISocketFactory? socketFactory = null)
     {
         if (accessManager != null && fileAccessManagerOptions != null)
@@ -355,7 +353,7 @@ public class TestHelper : IDisposable
             NetFilter = NetFilter,
             NetConfigurationProvider = netConfigurationProvider,
             SwapMemoryProvider = swapMemoryProvider,
-            TunProvider = tunProvider,
+            VpnAdapter = vpnAdapter,
             PublicIpDiscovery = false //it slows down our tests
         };
 
@@ -440,25 +438,6 @@ public class TestHelper : IDisposable
             await client.Connect();
 
         return client;
-    }
-
-
-    public SessionRequestEx CreateSessionRequestEx(Token token, string? clientId = null)
-    {
-        clientId ??= Guid.NewGuid().ToString();
-        return new SessionRequestEx {
-            TokenId = token.TokenId,
-            ClientInfo = new ClientInfo {
-                ClientId = clientId,
-                UserAgent = "Test",
-                ClientVersion = "1.0.0",
-                ProtocolVersion = 4
-            },
-            HostEndPoint = token.ServerToken.HostEndPoints!.First(),
-            EncryptedClientId = VhUtils.EncryptClientId(clientId, token.Secret),
-            ClientIp = null,
-            ExtraData = null
-        };
     }
 
 

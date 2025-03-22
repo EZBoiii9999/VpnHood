@@ -17,9 +17,9 @@ namespace VpnHood.Core.Client.Device.Droid;
 [Service(
     Permission = Manifest.Permission.BindVpnService,
     Exported = false,
-#if !DEBUG //todo
+// #if !DEBUG
     Process = ":vpnhood_process",
-#endif
+//#endif
     ForegroundServiceType = ForegroundService.TypeSystemExempted)]
 [IntentFilter(["android.net.VpnService"])]
 public class AndroidVpnService : VpnService, IVpnServiceHandler
@@ -40,6 +40,7 @@ public class AndroidVpnService : VpnService, IVpnServiceHandler
         [GeneratedEnum] StartCommandFlags flags, int startId)
     {
         var action = intent?.Action;
+        VhLogger.Instance.LogInformation("AndroidVpnService OnStartCommand. Action: {Action}", action);
 
         // get "manual" in 
         switch (action) {
@@ -80,6 +81,10 @@ public class AndroidVpnService : VpnService, IVpnServiceHandler
 
     public void StopNotification()
     {
+        if (_notification == null)
+            return;
+
+        VhLogger.Instance.LogDebug("Remove VpnService from foreground and stop the notification.");
         StopForeground(StopForegroundFlags.Remove);
 
         // clear notification

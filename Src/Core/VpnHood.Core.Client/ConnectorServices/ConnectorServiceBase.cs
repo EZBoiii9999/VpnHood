@@ -29,7 +29,7 @@ internal class ConnectorServiceBase : IAsyncDisposable, IJob
     public ClientConnectorStat Stat { get; }
     public TimeSpan RequestTimeout { get; private set; }
     public TimeSpan TcpReuseTimeout { get; private set; }
-    public int ProtocolVersion { get; private set; } = 6; // 5 is initial connection version
+    public int ProtocolVersion { get; private set; } = 6; 
 
     public ConnectorServiceBase(ConnectorEndPointInfo endPointInfo, ISocketFactory socketFactory,
         TimeSpan tcpConnectTimeout, bool allowTcpReuse)
@@ -72,7 +72,7 @@ internal class ConnectorServiceBase : IAsyncDisposable, IJob
         var clientStream = binaryStreamType == BinaryStreamType.None
             ? new TcpClientStream(tcpClient, sslStream, streamId)
             : new TcpClientStream(tcpClient, new BinaryStreamStandard(sslStream, streamId, useBuffer), streamId,
-                ReuseStreamClient);
+                ReuseClientStream);
 
         clientStream.RequireHttpResponse = true;
         return clientStream;
@@ -123,7 +123,7 @@ internal class ConnectorServiceBase : IAsyncDisposable, IJob
         return null;
     }
 
-    private Task ReuseStreamClient(IClientStream clientStream)
+    private Task ReuseClientStream(IClientStream clientStream)
     {
         _freeClientStreams.Enqueue(new ClientStreamItem { ClientStream = clientStream });
         return Task.CompletedTask;

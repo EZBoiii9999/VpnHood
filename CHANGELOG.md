@@ -1,12 +1,14 @@
-# Upcoming 
+# v6.0.677
+* Fix: Instability on pressing the connect and disconnect button
 
-
-# v6.0.672
-* Feature: Android: Run VPN in a separate process
-* Feature: Android: Using separate process for VPN service
-* Feature: Android: Edge to Edge UI
+# v6.0.676
+* Fix: Improve security by blocking multicast traffic
+* Fix: No internet connection on some devices
 * Fix: Android: Menu goes beneath system tray
 * Fix: Some ANR and crashes
+* Fix: Connect/Disconnect issues
+* Feature: Android: Using a separate process for VPN service
+* Feature: Android: Edge-to-Edge UI
 * Improve: virtual ip allocation
 * Improve: UI
 
